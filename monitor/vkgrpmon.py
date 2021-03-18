@@ -1,9 +1,10 @@
 #!/usr/bin/python3
 
 import os
-import requests
 import socket
 import time
+
+import requests
 
 
 class VkError(Exception):
@@ -159,7 +160,8 @@ class Splunk:
             data = line.encode("utf-8")
             self.sock.sendall(data)
 
-    def format_event(self, event):
+    @staticmethod
+    def format_event(event):
         """Represents a single event in key-value format suitable for indexing with Splunk. Keys are used verbatim
         without any modification. Values are first converted to string and then double quotes and newline characters
         are escaped with backslash.
@@ -202,18 +204,18 @@ class Slack:
             removed: A list of removed users where each entry is a dictionary with `id` and `role` keys.
         """
 
-        def format(entry):
-            id = entry["id"]
+        def format_entry(entry):
+            uid = entry["id"]
             role = entry["role"]
             display = entry.get("name") or entry["id"]
-            return f"<https://vk.com/id{id}|{display}> ({role})"
+            return f"<https://vk.com/id{uid}|{display}> ({role})"
 
         markdown_lines = []
         if added:
-            entries = [format(entry) for entry in added]
+            entries = [format_entry(entry) for entry in added]
             markdown_lines.append("*Added:* " + ", ".join(entries))
         if removed:
-            entries = [format(entry) for entry in removed]
+            entries = [format_entry(entry) for entry in removed]
             markdown_lines.append("*Removed:* " + ", ".join(entries))
         markdown = "\n".join(line for line in markdown_lines)
         self.send_notification(markdown)
@@ -243,7 +245,8 @@ class State:
     def __init__(self, path):
         self.path = path
 
-    def decode_entries(self, blobs):
+    @staticmethod
+    def decode_entries(blobs):
         """Decodes opaque strings (blobs) into entries.
 
         Args:
@@ -252,9 +255,10 @@ class State:
             A list where each entry is a dictionary with `id` and `role` keys.
         """
         split_blobs = [blob.split(":", 2) for blob in blobs]
-        return [{"id": id, "role": role} for [id, role] in split_blobs]
+        return [{"id": uid, "role": role} for [uid, role] in split_blobs]
 
-    def encode_entries(self, entries):
+    @staticmethod
+    def encode_entries(entries):
         """Encodes entries into opaque strings (blobs).
 
         Args:
@@ -280,7 +284,7 @@ class State:
         """Writes a list of opaque strings (blobs) to disk.
 
         Args:
-            entries (iterable): A list of opaque strings.
+            blobs (iterable): A list of opaque strings.
         """
         with open(self.path, "wt") as f:
             f.writelines("\n".join(blobs))
