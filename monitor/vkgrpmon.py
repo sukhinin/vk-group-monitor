@@ -12,6 +12,90 @@ class VkError(Exception):
     pass
 
 
+class VkGroupManager:
+    """Data class representing VK user with group management permissions.
+
+    Attributes:
+        id (str): User id.
+        role (str): Group management permissions level.
+        display_name (str): Display name for a user.
+    Args:
+        id (str or int): User id.
+        role (str): Group management permissions level.
+        display_name (str, optional): Display name for a user.
+    """
+
+    def __init__(self, id, role, display_name="<unknown>"):
+        if not id:
+            raise ValueError("Missing required argument id")
+        if not role:
+            raise ValueError("Missing required argument role")
+        self.id = str(id)
+        self.role = role
+        self.display_name = display_name
+
+    @property
+    def is_admin(self):
+        """bool: True when the user is a group administrator, False otherwise."""
+        return self.role in ["administrator", "creator"]
+
+    def add_user_details(self, user):
+        """Enriches data with user details.
+
+        Args:
+            user (:obj:`VkUser`): VK user details. May be None.
+        """
+        if not user:
+            return
+        self.display_name = user.display_name
+
+    def serialize(self):
+        """Serializes data to an opaque string.
+
+        Returns:
+            (str): String suitable for persisting to disk or using as an element of a set.
+        """
+        return f"{self.id}:{self.role}:{self.display_name}"
+
+    @staticmethod
+    def deserialize(s):
+        """Deserializes opaque string representation to an object.
+
+        Args:
+            s (str): String produced by a previous call to serialize() method.
+        Returns:
+            (obj:`VkGroupManager`): VkGroupManager instance.
+        """
+        [uid, role, display_name] = s.split(":", 3)
+        return VkGroupManager(uid, role, display_name)
+
+
+class VkUser:
+    """Data class representing generic VK user.
+
+    Attributes:
+        id (str): User id.
+        first_name (str): User's first name.
+        last_name (str): User's last name.
+    Args:
+        id (str or int): User id.
+        first_name (str, optional): User's first name.
+        last_name (str, optional): User's last name.
+    """
+
+    def __init__(self, id, first_name="", last_name=""):
+        if not id:
+            raise ValueError("Missing required argument id")
+        self.id = str(id)
+        self.first_name = first_name
+        self.last_name = last_name
+
+    @property
+    def display_name(self):
+        """str: User's display name or <anonymous> when name is not available."""
+        return " ".join([self.last_name, self.first_name]) or "<anonymous>"
+
+
 class Vk:
     """Implements a subset of VK API.
 
@@ -27,32 +111,35 @@ class Vk:
         self.access_token = access_token
 
     def get_group_managers_oneshot(self, group_id, offset=0):
-        """Returns a list of group's managers starting from specified offset without any pagination.
-        Pagination is supported by get_group_managers() method which in general should be preferred over this one.
+        """Returns a list of group managers starting from specified offset.
 
-        Note:
-            This method results in a single HTTP call.
+        When the result set is too large, only a portion of it from a single API call is returned to the caller.
+
+        This method does not perform any pagination, which is by get_group_managers() method.
+
         Args:
             group_id (str): Group identifier.
             offset (int, optional): Starting offset in members list. Defaults to 0.
         Returns:
-            A list of dictionaries where each item has `id` and `role` keys.
+            :obj:`list` of :obj:`VkGroupManager`: A list group managers.
         """
-        managers = []
+        group_managers = []
         data = self.call("groups.getMembers", filter="managers", group_id=group_id, offset=str(offset))
         for item in data["items"]:
-            managers.append({"id": str(item["id"]), "role": item["role"]})
-        return managers
+            manager = VkGroupManager(item["id"], item["role"])
+            group_managers.append(manager)
+        return group_managers
 
     def get_group_managers(self, group_id):
-        """Returns a list of group's managers.
+        """Returns a list of group managers.
 
-        Note:
-            This method supports pagination and may result in more than one API call.
+        When the result set is too large to be returned in a single API call, method will make additional
+        API calls to fetch all records.
+
         Args:
             group_id (str): Group identifier.
         Returns:
-            A list of dictionaries where each item has `id` and `role` keys.
+            :obj:`list` of :obj:`VkGroupManager`: List of group managers.
         """
         managers = []
         while True:
@@ -63,40 +150,35 @@ class Vk:
         return managers
 
     def get_users_oneshot(self, user_ids):
-        """Returns user details for up to 1000 user IDs. Unlimited number of entries can be obtained
-        by calling get_users() method.
+        """Returns a list of user details.
 
-        Note:
-            This method results in a single API call.
+        This method is limited to resolving 1000 user_ids.
+
         Args:
-            user_ids (iterable): A list of user IDs (strings). Limited to 1000 items.
+            user_ids (:obj:`list` of str): A list of user IDs. Should contain no more than 1000 elements.
         Returns:
-            Dictionary of user details keyed by user ID. Each value in dictionary is a dictionary itself
-            with a single `name` field.
+            :obj:`list` of :obj:`VkUser`: List of VK user details.
         """
-        users = {}
+        users = []
         data = self.call("users.get", user_ids=",".join(user_ids))
         for item in data:
-            name = " ".join([item["last_name"], item["first_name"]])
-            users[str(item["id"])] = {"name": name}
+            user = VkUser(item["id"], item["first_name"], item["last_name"])
+            users.append(user)
         return users
 
     def get_users(self, user_ids):
         """Returns a list of user details.
 
-        Note:
-            This method may result in more than one API call.
         Args:
-            user_ids (iterable): A list of user IDs (strings).
+            user_ids (:obj:`list` of str): A list of user IDs.
         Returns:
-            Dictionary of user details keyed by user ID. Each value in dictionary is a dictionary itself
-            with a single `name` field.
+            :obj:`list` of :obj:`VkUser`: List of VK user details.
         """
-        users = {}
+        users = []
         for i in range(0, len(user_ids), 1000):
-            user_ids_chunk = user_ids[i:i + 1000]
-            users_chunk = self.get_users_oneshot(user_ids_chunk)
-            users.update(users_chunk)
+            ids_chunk = user_ids[i:i + 1000]
+            users_chunk = self.get_users_oneshot(ids_chunk)
+            users.extend(users_chunk)
         return users
 
     def call(self, method, **kwargs):
@@ -152,8 +234,8 @@ class Splunk:
             Event fields have priority over extra fields.
 
         Args:
-            events: List of events where each event is a dictionary with arbitrary keys and values.
-            extra: Dictionary of extra keys and values to be added to each event.
+            events (:obj:`list` of :obj:`dict`): List of events where each event is an arbitrary dictionary.
+            extra (:obj:`dict`): Dictionary of extra fields to be included in every event.
         """
         for event in events:
             line = self.format_event({**extra, **event})
@@ -167,7 +249,7 @@ class Splunk:
         are escaped with backslash.
 
         Args:
-            event: Dictionary of keys and values.
+            event (:obj:`dict`): Dictionary of arbitrary keys and values.
         Returns:
             A string of key="value" pairs separated by spaces and terminated with \n.
         """
@@ -200,22 +282,19 @@ class Slack:
         when both `added` and `removed` lists are empty.
 
         Args:
-            added: A list of added users where each entry is a dictionary with `id` and `role` keys.
-            removed: A list of removed users where each entry is a dictionary with `id` and `role` keys.
+            added (:obj:`list` of :obj:`VkGroupManager`): A list of added group managers.
+            removed: (:obj:`list` of :obj:`VkGroupManager`): A list of removed group managers.
         """
 
-        def format_entry(entry):
-            uid = entry["id"]
-            role = entry["role"]
-            display = entry.get("name") or entry["id"]
-            return f"<https://vk.com/id{uid}|{display}> ({role})"
+        def format_group_manager(manager):
+            return f"<https://vk.com/id{manager.id}|{manager.display_name}> ({manager.role})"
 
         markdown_lines = []
         if added:
-            entries = [format_entry(entry) for entry in added]
+            entries = [format_group_manager(entry) for entry in added]
             markdown_lines.append("*Added:* " + ", ".join(entries))
         if removed:
-            entries = [format_entry(entry) for entry in removed]
+            entries = [format_group_manager(entry) for entry in removed]
             markdown_lines.append("*Removed:* " + ", ".join(entries))
         markdown = "\n".join(line for line in markdown_lines)
         self.send_notification(markdown)
@@ -236,77 +315,40 @@ class Slack:
 
 
 class State:
-    """Allows persisting and restoring a list of users and roles.
+    """Allows persisting a list of opaque strings to disk.
 
     Args:
-        path (str): Path to file used to persist state.
+        path (str): Path to file used to store state.
     """
 
     def __init__(self, path):
         self.path = path
 
-    @staticmethod
-    def decode_entries(blobs):
-        """Decodes opaque strings (blobs) into entries.
-
-        Args:
-            blobs (iterable): Opaque strings.
-        Returns:
-            A list where each entry is a dictionary with `id` and `role` keys.
-        """
-        split_blobs = [blob.split(":", 2) for blob in blobs]
-        return [{"id": uid, "role": role} for [uid, role] in split_blobs]
-
-    @staticmethod
-    def encode_entries(entries):
-        """Encodes entries into opaque strings (blobs).
-
-        Args:
-            entries (iterable): A list where each entry is a dictionary with `id` and `role` keys.
-        Returns:
-            A list of opaque strings.
-        """
-        return [f"{entry['id']}:{entry['role']}" for entry in entries]
-
-    def read_blobs(self):
-        """Reads a list of opaque strings (blobs) from disk.
+    def read(self):
+        """Reads a list of opaque strings from disk.
 
         Returns:
-            A list of opaque strings suitable for comparison.
+            (:obj:`list` of str): List of opaque strings or an empty list when no persisted state found.
         """
         try:
             with open(self.path, "rt") as f:
-                return [blob.strip() for blob in f.read().splitlines()]
+                return [line.strip() for line in f.read().splitlines()]
         except FileNotFoundError:
             return []
 
-    def write_blobs(self, blobs):
-        """Writes a list of opaque strings (blobs) to disk.
+    def write(self, lines):
+        """Writes a list of opaque strings to disk.
 
         Args:
-            blobs (iterable): A list of opaque strings.
+            lines (iterable): List of opaque strings.
         """
         with open(self.path, "wt") as f:
-            f.writelines("\n".join(blobs))
-
-
-def enrich_with_user_details(entry, users):
-    """Enriches data with user details.
-
-    Args:
-        entry: Dictionary with a single required field `id` that contains user ID.
-        users: Dictionary with user details keyed by user ID.
-    Returns:
-        The same entry with added user details.
-    """
-    user = users.get(entry["id"]) or {"name": ""}
-    return {**user, **entry}
+            f.writelines("\n".join(lines))
 
 
 def main():
     timestamp = time.time()
     state_file = "/var/lib/vkgrpmon/state"
-    vk_admin_roles = ["administrator", "creator"]
 
     vk_access_token = os.environ["VK_ACCESS_TOKEN"]
     vk_group_id = os.environ["VK_GROUP_ID"]
@@ -319,27 +361,25 @@ def main():
     splunk = Splunk(splunk_address)
 
     group_managers = vk.get_group_managers(vk_group_id)
-    group_admins = [entry for entry in group_managers if entry["role"] in vk_admin_roles]
-    current_blobs = set(state.encode_entries(group_admins))
-    previous_blobs = set(state.read_blobs())
+    group_admins = [gm for gm in group_managers if gm.is_admin]
+    current_group_admin_strings = set([ga.serialize() for ga in group_admins])
+    previous_group_admin_strings = set(state.read())
 
-    added_blobs = current_blobs - previous_blobs
-    added_entries = state.decode_entries(added_blobs)
-    removed_blobs = previous_blobs - current_blobs
-    removed_entries = state.decode_entries(removed_blobs)
+    removed_group_admin_strings = previous_group_admin_strings - current_group_admin_strings
+    removed_group_admins = [VkGroupManager.deserialize(s) for s in removed_group_admin_strings]
+    added_group_admin_strings = current_group_admin_strings - previous_group_admin_strings
+    added_group_admins = [VkGroupManager.deserialize(s) for s in added_group_admin_strings]
 
-    changed_entries = [*removed_entries, *added_entries]
-    changed_user_ids = [entry["id"] for entry in changed_entries]
-    changed_users = vk.get_users(changed_user_ids)
+    user_ids = [ga.id for ga in added_group_admins]
+    users = {user.id: user for user in vk.get_users(user_ids)}
+    for ga in added_group_admins:
+        ga.add_user_details(users.get(ga.id))
 
-    enriched_added_entries = [enrich_with_user_details(entry, changed_users) for entry in added_entries]
-    enriched_removed_entries = [enrich_with_user_details(entry, changed_users) for entry in removed_entries]
+    slack.send_change_notification(added_group_admins, removed_group_admins)
+    splunk.write_events_batch([vars(ga) for ga in added_group_admins], timestamp=timestamp, change="added")
+    splunk.write_events_batch([vars(ga) for ga in removed_group_admins], timestamp=timestamp, change="removed")
 
-    slack.send_change_notification(enriched_added_entries, enriched_removed_entries)
-    splunk.write_events_batch(enriched_added_entries, timestamp=timestamp, change="added")
-    splunk.write_events_batch(enriched_removed_entries, timestamp=timestamp, change="removed")
-
-    state.write_blobs(current_blobs)
+    state.write(current_group_admin_strings)
 
 
 if __name__ == "__main__":
