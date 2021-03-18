@@ -238,9 +238,21 @@ class Splunk:
             extra (:obj:`dict`): Dictionary of extra fields to be included in every event.
         """
         for event in events:
-            line = self.format_event({**extra, **event})
-            data = line.encode("utf-8")
-            self.sock.sendall(data)
+            self.write_event(event, **extra)
+
+    def write_event(self, event, **extra):
+        """Writes a single event to Splunk.
+
+        Note:
+            Event fields have priority over extra fields.
+
+        Args:
+            event (:obj:`dict`): Arbitrary dictionary.
+            extra (:obj:`dict`): Dictionary of extra fields to be included in event.
+        """
+        line = self.format_event({**extra, **event})
+        data = line.encode("utf-8")
+        self.sock.sendall(data)
 
     @staticmethod
     def format_event(event):
@@ -376,10 +388,11 @@ def main():
         ga.add_user_details(users.get(ga.id))
 
     slack.send_change_notification(added_group_admins, removed_group_admins)
-    splunk.write_events_batch([vars(ga) for ga in added_group_admins], timestamp=timestamp, change="added")
-    splunk.write_events_batch([vars(ga) for ga in removed_group_admins], timestamp=timestamp, change="removed")
+    splunk.write_events_batch([vars(ga) for ga in added_group_admins], timestamp=timestamp, op="add")
+    splunk.write_events_batch([vars(ga) for ga in removed_group_admins], timestamp=timestamp, op="remove")
 
     state.write(current_group_admin_strings)
+    splunk.write_event({}, timestamp=timestamp, op="check")
 
 
 if __name__ == "__main__":
