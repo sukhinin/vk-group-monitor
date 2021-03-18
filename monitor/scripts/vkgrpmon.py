@@ -37,8 +37,11 @@ class Vk:
         Returns:
             A list of dictionaries where each item has `id` and `role` keys.
         """
+        managers = []
         data = self.call("groups.getMembers", filter="managers", group_id=group_id, offset=str(offset))
-        return [{"id": item["id"], "role": item["role"]} for item in data["items"]]
+        for item in data["items"]:
+            managers.append({"id": str(item["id"]), "role": item["role"]})
+        return managers
 
     def get_group_managers(self, group_id):
         """Returns a list of group's managers.
@@ -57,6 +60,43 @@ class Vk:
                 break
             managers.extend(items)
         return managers
+
+    def get_users_oneshot(self, user_ids):
+        """Returns user details for up to 1000 user IDs. Unlimited number of entries can be obtained
+        by calling get_users() method.
+
+        Note:
+            This method results in a single API call.
+        Args:
+            user_ids (iterable): A list of user IDs (strings). Limited to 1000 items.
+        Returns:
+            Dictionary with user details keyed by user ID. Each value in dictionary is a dictionary itself
+            with a single `name` field.
+        """
+        users = {}
+        data = self.call("users.get", user_ids=",".join(user_ids))
+        for item in data:
+            name = " ".join([item["last_name"], item["first_name"]])
+            users[str(item["id"])] = {"name": name}
+        return users
+
+    def get_users(self, user_ids):
+        """Returns a list of user details.
+
+        Note:
+            This method may result in more than one API call.
+        Args:
+            user_ids (iterable): A list of user IDs (strings).
+        Returns:
+            Dictionary with user details keyed by user ID. Each value in dictionary is a dictionary itself
+            with a single `name` field.
+        """
+        users = {}
+        for i in range(0, len(user_ids), 1000):
+            user_ids_chunk = user_ids[i:i + 1000]
+            users_chunk = self.get_users_oneshot(user_ids_chunk)
+            users.update(users_chunk)
+        return users
 
     def call(self, method, **kwargs):
         """ Calls the specified VK API method.
@@ -161,12 +201,19 @@ class Slack:
             added: A list of added users where each entry is a dictionary with `id` and `role` keys.
             removed: A list of removed users where each entry is a dictionary with `id` and `role` keys.
         """
+
+        def format(entry):
+            id = entry["id"]
+            role = entry["role"]
+            display = entry.get("name") or entry["id"]
+            return f"<https://vk.com/id{id}|{display}> ({role})"
+
         markdown_lines = []
         if added:
-            entries = [f"<https://vk.com/id{v['id']}|{v['id']}> ({v['role']})" for v in added]
+            entries = [format(entry) for entry in added]
             markdown_lines.append("*Added:* " + ", ".join(entries))
         if removed:
-            entries = [f"<https://vk.com/id{v['id']}|{v['id']}> ({v['role']})" for v in removed]
+            entries = [format(entry) for entry in removed]
             markdown_lines.append("*Removed:* " + ", ".join(entries))
         markdown = "\n".join(line for line in markdown_lines)
         self.send_notification(markdown)
@@ -239,6 +286,19 @@ class State:
             f.writelines("\n".join(blobs))
 
 
+def enrich_with_user_details(entry, users):
+    """Enriches data with user details.
+
+    Args:
+        entry: Dictionary with a single required field `id` that contains user ID.
+        users: Dictionary with user details keyed by user ID.
+    Returns:
+        The same entry with added user details.
+    """
+    user = users.get(entry["id"]) or {"name": ""}
+    return {**user, **entry}
+
+
 def main():
     timestamp = time.time()
     state_file = "/var/lib/vkgrpmon/state"
@@ -254,9 +314,9 @@ def main():
     slack = Slack(slack_webhook_url)
     splunk = Splunk(splunk_address)
 
-    managers = vk.get_group_managers(vk_group_id)
-    current_admins = [entry for entry in managers if entry["role"] in vk_admin_roles]
-    current_blobs = set(state.encode_entries(current_admins))
+    group_managers = vk.get_group_managers(vk_group_id)
+    group_admins = [entry for entry in group_managers if entry["role"] in vk_admin_roles]
+    current_blobs = set(state.encode_entries(group_admins))
     previous_blobs = set(state.read_blobs())
 
     added_blobs = current_blobs - previous_blobs
@@ -264,9 +324,16 @@ def main():
     removed_blobs = previous_blobs - current_blobs
     removed_entries = state.decode_entries(removed_blobs)
 
-    slack.send_change_notification(added_entries, removed_entries)
-    splunk.write_events_batch(added_entries, change="added", timestamp=timestamp)
-    splunk.write_events_batch(removed_entries, change="removed", timestamp=timestamp)
+    changed_entries = [*removed_entries, *added_entries]
+    changed_user_ids = [entry["id"] for entry in changed_entries]
+    changed_users = vk.get_users(changed_user_ids)
+
+    enriched_added_entries = [enrich_with_user_details(entry, changed_users) for entry in added_entries]
+    enriched_removed_entries = [enrich_with_user_details(entry, changed_users) for entry in removed_entries]
+
+    slack.send_change_notification(enriched_added_entries, enriched_removed_entries)
+    splunk.write_events_batch(enriched_added_entries, timestamp=timestamp, change="added")
+    splunk.write_events_batch(enriched_removed_entries, timestamp=timestamp, change="removed")
 
     state.write_blobs(current_blobs)
 
