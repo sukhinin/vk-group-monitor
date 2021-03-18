@@ -50,10 +50,11 @@ class VkGroupManager:
         self.display_name = user.display_name
 
     def serialize(self):
-        """Serializes data to an opaque string.
+        """Serializes data to an opaque string that contains all information about VK group manager.
+        At the same time, opaque strings can be a member of a set or can be easily persisted to disk.
 
         Returns:
-            (str): String suitable for persisting to disk or using as an element of a set.
+            (str): Opaque string.
         """
         return f"{self.id}:{self.role}:{self.display_name}"
 
@@ -113,10 +114,12 @@ class Vk:
     def get_group_managers_oneshot(self, group_id, offset=0):
         """Returns a list of group managers starting from specified offset.
 
-        When the result set is too large, only a portion of it from a single API call is returned to the caller.
+        When the result set is too large, only a portion of it is returned to the caller from
+        a single method invocation. Subsequent invocations with increased offsets are necessary
+        to retrieve the full results.
 
-        This method does not perform any pagination, which is by get_group_managers() method.
-
+        Note:
+            To get all results from a single call use get_group_managers() method.
         Args:
             group_id (str): Group identifier.
             offset (int, optional): Starting offset in members list. Defaults to 0.
@@ -131,10 +134,8 @@ class Vk:
         return group_managers
 
     def get_group_managers(self, group_id):
-        """Returns a list of group managers.
-
-        When the result set is too large to be returned in a single API call, method will make additional
-        API calls to fetch all records.
+        """Returns a list of group managers. When the result set is too large to be returned in a single
+        API call, this method will make additional calls to retrieve the full results.
 
         Args:
             group_id (str): Group identifier.
@@ -150,9 +151,8 @@ class Vk:
         return managers
 
     def get_users_oneshot(self, user_ids):
-        """Returns a list of user details.
-
-        This method is limited to resolving 1000 user_ids.
+        """Returns a list of user details. VK API is limited to returning no more than 1000 users in a single call.
+        It's advised to call get_users() method that works around this limitation by performing multiple API calls.
 
         Args:
             user_ids (:obj:`list` of str): A list of user IDs. Should contain no more than 1000 elements.
@@ -167,7 +167,8 @@ class Vk:
         return users
 
     def get_users(self, user_ids):
-        """Returns a list of user details.
+        """Returns a list of user details. When the list of user IDs is too big, this method will make multiple
+        API calls to get the full results.
 
         Args:
             user_ids (:obj:`list` of str): A list of user IDs.
@@ -182,9 +183,8 @@ class Vk:
         return users
 
     def call(self, method, **kwargs):
-        """ Calls the specified VK API method.
-
-        Method name and arguments are used 'as is' without any processing or encoding.
+        """ Calls the specified VK API method. Method name and arguments are used 'as is' without
+        any processing or encoding.
 
         Note:
             Do not include `access_token` or `v` parameters in `**kwargs` as they're provided
@@ -256,9 +256,9 @@ class Splunk:
 
     @staticmethod
     def format_event(event):
-        """Represents a single event in key-value format suitable for indexing with Splunk. Keys are used verbatim
-        without any modification. Values are first converted to string and then double quotes and newline characters
-        are escaped with backslash.
+        """Formats an event in key-value format suitable for indexing with Splunk. Keys are used verbatim
+        without any modification. Values are first converted to string and then double quotes and newline
+        characters are escaped with backslash.
 
         Args:
             event (:obj:`dict`): Dictionary of arbitrary keys and values.
@@ -290,8 +290,8 @@ class Slack:
         self.url = url
 
     def send_change_notification(self, added, removed):
-        """Posts notification to Slack about added and removed users with special roles. No notification is posted
-        when both `added` and `removed` lists are empty.
+        """Posts notification to Slack about added and removed users with special roles. No notification
+        is posted when both `added` and `removed` lists are empty.
 
         Args:
             added (:obj:`list` of :obj:`VkGroupManager`): A list of added group managers.
@@ -362,6 +362,7 @@ def main():
     timestamp = time.time()
     state_file = "/var/lib/vkgrpmon/state"
 
+    # Read configuration parameters from environment variables.
     vk_access_token = os.environ["VK_ACCESS_TOKEN"]
     vk_group_id = os.environ["VK_GROUP_ID"]
     slack_webhook_url = os.environ["SLACK_WEBHOOK_URL"]
@@ -372,26 +373,38 @@ def main():
     slack = Slack(slack_webhook_url)
     splunk = Splunk(splunk_address)
 
+    # Get current and previous group admins. Entries are represented as opaque strings suitable for set operations.
     group_managers = vk.get_group_managers(vk_group_id)
     group_admins = [gm for gm in group_managers if gm.is_admin]
     current_group_admin_strings = set([ga.serialize() for ga in group_admins])
     previous_group_admin_strings = set(state.read())
 
+    # Determine sets of users that have been added or removed from group admins.
     removed_group_admin_strings = previous_group_admin_strings - current_group_admin_strings
-    removed_group_admins = [VkGroupManager.deserialize(s) for s in removed_group_admin_strings]
     added_group_admin_strings = current_group_admin_strings - previous_group_admin_strings
+
+    # Deserialize entries from opaque strings.
+    removed_group_admins = [VkGroupManager.deserialize(s) for s in removed_group_admin_strings]
     added_group_admins = [VkGroupManager.deserialize(s) for s in added_group_admin_strings]
 
+    # Enrich entries of newly added VK group admins with user details. Enrichment fields
+    # are persisted to disk, so there's no need to enrich entries of removed admins.
     user_ids = [ga.id for ga in added_group_admins]
     users = {user.id: user for user in vk.get_users(user_ids)}
     for ga in added_group_admins:
         ga.add_user_details(users.get(ga.id))
 
+    # Send notifications to Slack and Splunk.
     slack.send_change_notification(added_group_admins, removed_group_admins)
     splunk.write_events_batch([vars(ga) for ga in added_group_admins], timestamp=timestamp, op="add")
     splunk.write_events_batch([vars(ga) for ga in removed_group_admins], timestamp=timestamp, op="remove")
 
+    # Persist current VK group admins to disk. These objects are already serialized, so there's no need
+    # to serialize then again.
     state.write(current_group_admin_strings)
+
+    # Write event to Splunk on successful execution. Absence of events with op="check" can be used
+    # to detect problems with monitoring pipeline.
     splunk.write_event({}, timestamp=timestamp, op="check")
 
 
