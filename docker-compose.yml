@@ -1,0 +1,16 @@
+version: "3.9"
+services:
+  monitor:
+    build: ./monitor
+    environment:
+      - SPLUNK_ADDRESS=splunk:9999
+      - VK_ACCESS_TOKEN
+      - VK_GROUP_ID
+      - SLACK_WEBHOOK_URL
+  splunk:
+    build: ./splunk
+    ports:
+      - "8000:8000"
+    environment:
+      - SPLUNK_START_ARGS
+      - SPLUNK_PASSWORD
