@@ -1,2 +1,2 @@
 FROM splunk/splunk:8.1
-COPY apps /opt/splunk/etc/apps
+COPY splunk_app /opt/splunk/etc/apps/vkgrpmon
