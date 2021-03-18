@@ -27,9 +27,9 @@ class VkGroupManager:
 
     def __init__(self, id, role, display_name="<unknown>"):
         if not id:
-            raise ValueError("Missing required argument id")
+            raise ValueError("Missing required argument: id")
         if not role:
-            raise ValueError("Missing required argument role")
+            raise ValueError("Missing required argument: role")
         self.id = str(id)
         self.role = role
         self.display_name = display_name
@@ -86,7 +86,7 @@ class VkUser:
 
     def __init__(self, id, first_name="", last_name=""):
         if not id:
-            raise ValueError("Missing required argument id")
+            raise ValueError("Missing required argument: id")
         self.id = str(id)
         self.first_name = first_name
         self.last_name = last_name
@@ -94,7 +94,12 @@ class VkUser:
     @property
     def display_name(self):
         """str: User's display name or <anonymous> when name is not available."""
-        return " ".join([self.last_name, self.first_name]) or "<anonymous>"
+        if self.first_name and self.last_name:
+            return self.last_name + " " + self.first_name
+        elif self.first_name or self.last_name:
+            return self.last_name + self.first_name
+        else:
+            return "<anonymous>"
 
 
 class Vk:
@@ -108,6 +113,8 @@ class Vk:
     """
 
     def __init__(self, access_token):
+        if not access_token:
+            raise ValueError("Missing required argument: access_token")
         self.api_version = "5.52"
         self.access_token = access_token
 
@@ -166,18 +173,19 @@ class Vk:
             users.append(user)
         return users
 
-    def get_users(self, user_ids):
-        """Returns a list of user details. When the list of user IDs is too big, this method will make multiple
-        API calls to get the full results.
+    def get_users(self, user_ids, chunk_size=1000):
+        """Returns a list of user details. When the list of user IDs is too big, this method will split it into chunks
+        and make multiple API calls to get the full results.
 
         Args:
             user_ids (:obj:`list` of str): A list of user IDs.
+            chunk_size (int): A number of user IDs that can be requested in a single API call.
         Returns:
             :obj:`list` of :obj:`VkUser`: List of VK user details.
         """
         users = []
-        for i in range(0, len(user_ids), 1000):
-            ids_chunk = user_ids[i:i + 1000]
+        for i in range(0, len(user_ids), chunk_size):
+            ids_chunk = user_ids[i:i + chunk_size]
             users_chunk = self.get_users_oneshot(ids_chunk)
             users.extend(users_chunk)
         return users
@@ -267,7 +275,7 @@ class Splunk:
         """
         kv = ""
         for key in event:
-            val = str(event[key]).replace('"', '\\"').replace('\n', '\\n')
+            val = str(event[key]).replace('"', '\\"').replace('\n', '\\n').replace('\r', '\\r')
             kv += key + '="' + val + '" '
         return kv + "\n"
 
@@ -287,6 +295,8 @@ class Slack:
     """
 
     def __init__(self, url):
+        if not url:
+            raise ValueError("Missing required argument: url")
         self.url = url
 
     def send_change_notification(self, added, removed):
@@ -294,7 +304,7 @@ class Slack:
         is posted when both `added` and `removed` lists are empty.
 
         Args:
-            added (:obj:`list` of :obj:`VkGroupManager`): A list of added group managers.
+            added (:obj:`list` of `VkGroupManager`): A list of added group managers.
             removed: (:obj:`list` of :obj:`VkGroupManager`): A list of removed group managers.
         """
 
@@ -309,13 +319,13 @@ class Slack:
             entries = [format_group_manager(entry) for entry in removed]
             markdown_lines.append("*Removed:* " + ", ".join(entries))
         markdown = "\n".join(line for line in markdown_lines)
-        self.send_notification(markdown)
+        self.send_markdown(markdown)
 
-    def send_notification(self, markdown):
+    def send_markdown(self, markdown):
         """Posts generic markdown to Slack channel. No notification is posted when `markdown` is empty.
 
         Args:
-            markdown (str): Notification text with markdown formatting.
+            markdown (str): Text with markdown formatting.
         """
         if not markdown:
             return
@@ -334,6 +344,8 @@ class State:
     """
 
     def __init__(self, path):
+        if not path:
+            raise ValueError("Missing required argument: path")
         self.path = path
 
     def read(self):
@@ -374,6 +386,8 @@ def main():
     splunk = Splunk(splunk_address)
 
     # Get current and previous group admins. Entries are represented as opaque strings suitable for set operations.
+    # At this point there are no user details in VkGroupManager objects, so serialized data will not contain
+    # display user names.
     group_managers = vk.get_group_managers(vk_group_id)
     group_admins = [gm for gm in group_managers if gm.is_admin]
     current_group_admin_strings = set([ga.serialize() for ga in group_admins])
@@ -387,11 +401,11 @@ def main():
     removed_group_admins = [VkGroupManager.deserialize(s) for s in removed_group_admin_strings]
     added_group_admins = [VkGroupManager.deserialize(s) for s in added_group_admin_strings]
 
-    # Enrich entries of newly added VK group admins with user details. Enrichment fields
-    # are persisted to disk, so there's no need to enrich entries of removed admins.
-    user_ids = [ga.id for ga in added_group_admins]
+    # Enrich entries of newly added VK group admins with user details.
+    changed_group_admins = removed_group_admins + added_group_admins
+    user_ids = [ga.id for ga in changed_group_admins]
     users = {user.id: user for user in vk.get_users(user_ids)}
-    for ga in added_group_admins:
+    for ga in changed_group_admins:
         ga.add_user_details(users.get(ga.id))
 
     # Send notifications to Slack and Splunk.
