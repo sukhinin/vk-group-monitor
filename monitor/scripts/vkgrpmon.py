@@ -70,7 +70,7 @@ class Vk:
         Args:
             user_ids (iterable): A list of user IDs (strings). Limited to 1000 items.
         Returns:
-            Dictionary with user details keyed by user ID. Each value in dictionary is a dictionary itself
+            Dictionary of user details keyed by user ID. Each value in dictionary is a dictionary itself
             with a single `name` field.
         """
         users = {}
@@ -88,7 +88,7 @@ class Vk:
         Args:
             user_ids (iterable): A list of user IDs (strings).
         Returns:
-            Dictionary with user details keyed by user ID. Each value in dictionary is a dictionary itself
+            Dictionary of user details keyed by user ID. Each value in dictionary is a dictionary itself
             with a single `name` field.
         """
         users = {}
