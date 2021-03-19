@@ -410,8 +410,10 @@ def main():
 
     # Send notifications to Slack and Splunk.
     slack.send_change_notification(added_group_admins, removed_group_admins)
-    splunk.write_events_batch([vars(ga) for ga in added_group_admins], timestamp=timestamp, op="add")
-    splunk.write_events_batch([vars(ga) for ga in removed_group_admins], timestamp=timestamp, op="remove")
+    splunk.write_events_batch([vars(ga) for ga in added_group_admins],
+                              timestamp=timestamp, op="add", group_id=vk_group_id)
+    splunk.write_events_batch([vars(ga) for ga in removed_group_admins],
+                              timestamp=timestamp, op="remove", group_id=vk_group_id)
 
     # Persist current VK group admins to disk. These objects are already serialized, so there's no need
     # to serialize then again.
@@ -419,7 +421,7 @@ def main():
 
     # Write event to Splunk on successful execution. Absence of events with op="check" can be used
     # to detect problems with monitoring pipeline.
-    splunk.write_event({}, timestamp=timestamp, op="check")
+    splunk.write_event({}, timestamp=timestamp, op="check", group_id=vk_group_id)
 
 
 if __name__ == "__main__":
