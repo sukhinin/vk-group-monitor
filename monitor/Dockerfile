@@ -11,4 +11,4 @@ COPY vkgrpmon.py /usr/local/bin/vkgrpmon.py
 RUN chmod a+x /usr/local/bin/vkgrpmon.py
 
 COPY crontab /etc/crontabs/vkgrpmon
-CMD ["/usr/sbin/crond", "-f", "-l", "0"]
+CMD ["/usr/sbin/crond", "-f"]
