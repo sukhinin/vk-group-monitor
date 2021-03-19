@@ -299,13 +299,14 @@ class Slack:
             raise ValueError("Missing required argument: url")
         self.url = url
 
-    def send_change_notification(self, added, removed):
+    def send_change_notification(self, added, removed, prefix=""):
         """Posts notification to Slack about added and removed users with special roles. No notification
         is posted when both `added` and `removed` lists are empty.
 
         Args:
             added (:obj:`list` of `VkGroupManager`): A list of added group managers.
-            removed: (:obj:`list` of :obj:`VkGroupManager`): A list of removed group managers.
+            removed (:obj:`list` of :obj:`VkGroupManager`): A list of removed group managers.
+            prefix (str): Arbitrary markdown that will be included in notification.
         """
 
         def format_group_manager(manager):
@@ -319,6 +320,8 @@ class Slack:
             entries = [format_group_manager(entry) for entry in removed]
             markdown_lines.append("*Removed:* " + ", ".join(entries))
         markdown = "\n".join(line for line in markdown_lines)
+        if prefix:
+            markdown = prefix + "\n" + markdown
         self.send_markdown(markdown)
 
     def send_markdown(self, markdown):
@@ -409,7 +412,8 @@ def main():
         ga.add_user_details(users.get(ga.id))
 
     # Send notifications to Slack and Splunk.
-    slack.send_change_notification(added_group_admins, removed_group_admins)
+    slack.send_change_notification(added_group_admins, removed_group_admins,
+                                   prefix="Изменения в группе " + vk_group_id)
     splunk.write_events_batch([vars(ga) for ga in added_group_admins],
                               timestamp=timestamp, op="add", group_id=vk_group_id)
     splunk.write_events_batch([vars(ga) for ga in removed_group_admins],

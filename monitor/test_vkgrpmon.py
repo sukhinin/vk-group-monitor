@@ -158,6 +158,16 @@ class SlackTestCase(unittest.TestCase):
         mocked_send_markdown.assert_called_once_with(expected)
 
     @mock.patch.object(Slack, "send_markdown")
+    def test_send_change_notification_should_call_send_markdown_and_include_prefix(self, mocked_send_markdown):
+        added = [VkGroupManager("id1", "role1", "name1")]
+        removed = [VkGroupManager("id2", "role2", "name2")]
+        Slack("url").send_change_notification(added, removed, prefix="prefix markdown")
+        expected = "\n".join(["prefix markdown",
+                              "*Added:* <https://vk.com/idid1|name1> (role1)",
+                              "*Removed:* <https://vk.com/idid2|name2> (role2)"])
+        mocked_send_markdown.assert_called_once_with(expected)
+
+    @mock.patch.object(Slack, "send_markdown")
     def test_send_change_notification_should_handle_empty_added_list(self, mocked_send_markdown):
         added = []
         removed = [VkGroupManager("id3", "role3", "name3"), VkGroupManager("id4", "role4", "name4")]
