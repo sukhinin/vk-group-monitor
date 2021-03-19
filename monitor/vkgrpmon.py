@@ -390,7 +390,7 @@ def main():
 
     # Get current and previous group admins. Entries are represented as opaque strings suitable for set operations.
     # At this point there are no user details in VkGroupManager objects, so serialized data will not contain
-    # display user names.
+    # user display names.
     group_managers = vk.get_group_managers(vk_group_id)
     group_admins = [gm for gm in group_managers if gm.is_admin]
     current_group_admin_strings = set([ga.serialize() for ga in group_admins])
