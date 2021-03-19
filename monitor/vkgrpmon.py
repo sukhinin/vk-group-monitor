@@ -308,6 +308,8 @@ class Slack:
             removed (:obj:`list` of :obj:`VkGroupManager`): A list of removed group managers.
             prefix (str): Arbitrary markdown that will be included in notification.
         """
+        if not added and not removed:
+            return
 
         def format_group_manager(manager):
             return f"<https://vk.com/id{manager.id}|{manager.display_name}> ({manager.role})"

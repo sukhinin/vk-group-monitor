@@ -158,6 +158,11 @@ class SlackTestCase(unittest.TestCase):
         mocked_send_markdown.assert_called_once_with(expected)
 
     @mock.patch.object(Slack, "send_markdown")
+    def test_send_change_notification_should_not_call_send_markdown_with_no_changes(self, mocked_send_markdown):
+        Slack("url").send_change_notification([], [], prefix="prefix")
+        mocked_send_markdown.assert_not_called()
+
+    @mock.patch.object(Slack, "send_markdown")
     def test_send_change_notification_should_call_send_markdown_and_include_prefix(self, mocked_send_markdown):
         added = [VkGroupManager("id1", "role1", "name1")]
         removed = [VkGroupManager("id2", "role2", "name2")]
