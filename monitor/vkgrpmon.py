@@ -375,9 +375,9 @@ class State:
 
 def main():
     timestamp = time.time()
-    state_file = "/var/lib/vkgrpmon/state"
 
     # Read configuration parameters from environment variables.
+    state_file = os.environ["STATE_FILE"]
     vk_access_token = os.environ["VK_ACCESS_TOKEN"]
     vk_group_id = os.environ["VK_GROUP_ID"]
     slack_webhook_url = os.environ["SLACK_WEBHOOK_URL"]

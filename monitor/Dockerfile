@@ -7,6 +7,7 @@ RUN addgroup -S vkgrpmon && \
     mkdir /var/lib/vkgrpmon && \
     chown vkgrpmon /var/lib/vkgrpmon
 
+ENV STATE_FILE /var/lib/vkgrpmon/state
 COPY vkgrpmon.py /usr/local/bin/vkgrpmon.py
 RUN chmod a+x /usr/local/bin/vkgrpmon.py
 
